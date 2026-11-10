@@ -1,0 +1,6 @@
+{
+  "name": "Zenith Workspace - Notes, Calendar, Salary & Budget Hub",
+  "description": "All-in-one Google Keep notes, calendar scheduler, gross-to-net salary calculator, monthly budgeting, and encrypted offline vault with biometric authentication.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
