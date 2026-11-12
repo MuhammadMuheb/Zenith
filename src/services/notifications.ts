@@ -1,4 +1,4 @@
-import { AppNotification, BudgetItem, CalendarEvent, SalaryConfig } from '../types';
+import { AppNotification, SimpleMoneyEntry } from '../types';
 
 /**
  * Web Audio Bell Chime Generator
@@ -6,12 +6,13 @@ import { AppNotification, BudgetItem, CalendarEvent, SalaryConfig } from '../typ
  */
 export function playChimeSound(type: 'success' | 'alert' | 'payday' = 'alert') {
   try {
-    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AudioContextClass =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextClass) return;
     const ctx = new AudioContextClass();
 
     if (type === 'payday') {
-      // Play a cheerful two-tone chime (E5 -> B5)
       const now = ctx.currentTime;
       [
         { freq: 659.25, time: now, dur: 0.4 },
@@ -86,127 +87,38 @@ export function sendBrowserNotification(title: string, options?: NotificationOpt
 }
 
 /**
- * Check upcoming events, paydays, and bills to generate smart auto-notifications
+ * Evaluate daily loan alarms and alerts
  */
-export function evaluateAutoNotifications(
-  salary: SalaryConfig,
-  expenses: BudgetItem[],
-  events: CalendarEvent[],
+export function checkLoanAlarms(
+  entries: SimpleMoneyEntry[],
   existingNotifications: AppNotification[]
 ): AppNotification[] {
   const newAlerts: AppNotification[] = [];
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-  const currentDay = today.getDate();
-  const currentMonth = today.getMonth() + 1;
-  const currentYear = today.getFullYear();
+  const todayStr = new Date().toISOString().split('T')[0];
 
-  const isDuplicate = (title: string) => {
-    return (
-      existingNotifications.some((n) => n.title === title && n.timestamp.startsWith(todayStr)) ||
-      newAlerts.some((n) => n.title === title)
+  const pendingDue = entries.filter(
+    (e) =>
+      e.type === 'lent' &&
+      !e.isCleared &&
+      e.returnDate &&
+      e.returnDate <= todayStr
+  );
+
+  pendingDue.forEach((loan) => {
+    const title = `Loan Alarm: ${loan.person || 'Friend'}`;
+    const message = `Today: take ${loan.amount.toLocaleString()} from ${loan.person || 'Friend'}.`;
+    const alreadyNotified = existingNotifications.some(
+      (n) => n.message === message && n.timestamp.startsWith(todayStr)
     );
-  };
 
-  // 1. Payday notification check
-  const isPaydayToday =
-    currentDay === salary.payDayDate ||
-    (salary.payDayFrequency === 'semi-monthly' && currentDay === salary.payDayDateSecondary);
-
-  const daysUntilPayday =
-    salary.payDayDate >= currentDay
-      ? salary.payDayDate - currentDay
-      : new Date(currentYear, currentMonth, 0).getDate() - currentDay + salary.payDayDate;
-
-  if (isPaydayToday && !isDuplicate('💰 Payday is Today!')) {
-    newAlerts.push({
-      id: 'payday-' + todayStr,
-      title: '💰 Payday is Today!',
-      message: `Your scheduled paycheck deposit is ready. Verify your net take-home pay and update your savings.`,
-      timestamp: new Date().toISOString(),
-      type: 'salary',
-      read: false,
-      actionTab: 'salary',
-    });
-  } else if (daysUntilPayday === 1 && !isDuplicate('💵 Payday Tomorrow')) {
-    newAlerts.push({
-      id: 'payday-tomorrow-' + todayStr,
-      title: '💵 Payday Tomorrow',
-      message: `Get ready! Scheduled deposit arriving tomorrow. Budget allocations are locked.`,
-      timestamp: new Date().toISOString(),
-      type: 'salary',
-      read: false,
-      actionTab: 'salary',
-    });
-  }
-
-  // 2. Upcoming recurring bills check (within 3 days)
-  expenses.forEach((item) => {
-    if (item.isRecurring && !item.isPaid && item.dueDate) {
-      let daysRemaining = item.dueDate - currentDay;
-      if (daysRemaining < 0) {
-        // already passed this month
-        daysRemaining += new Date(currentYear, currentMonth, 0).getDate();
-      }
-
-      if (daysRemaining === 0) {
-        const title = `⚠️ Bill Due Today: ${item.title}`;
-        if (!isDuplicate(title)) {
-          newAlerts.push({
-            id: `bill-due-${item.id}-${todayStr}`,
-            title,
-            message: `${item.title} ($${item.amount.toLocaleString()}) is scheduled for payment today.`,
-            timestamp: new Date().toISOString(),
-            type: 'bill',
-            read: false,
-            actionTab: 'budget',
-          });
-        }
-      } else if (daysRemaining <= 3) {
-        const title = `⏰ Upcoming Bill: ${item.title}`;
-        if (!isDuplicate(title)) {
-          newAlerts.push({
-            id: `bill-warn-${item.id}-${todayStr}`,
-            title,
-            message: `${item.title} ($${item.amount.toLocaleString()}) is due in ${daysRemaining} day${
-              daysRemaining > 1 ? 's' : ''
-            }.`,
-            timestamp: new Date().toISOString(),
-            type: 'bill',
-            read: false,
-            actionTab: 'budget',
-          });
-        }
-      }
-    }
-  });
-
-  // 3. Today's calendar reminders
-  events.forEach((evt) => {
-    if (evt.date === todayStr && !isDuplicate(`📅 Reminder: ${evt.title}`)) {
+    if (!alreadyNotified) {
       newAlerts.push({
-        id: `cal-today-${evt.id}`,
-        title: `📅 Reminder: ${evt.title}`,
-        message: evt.description || `Scheduled item at ${evt.time || 'all day'}.`,
+        id: 'alarm-' + loan.id + '-' + todayStr,
+        title,
+        message,
         timestamp: new Date().toISOString(),
-        type: 'reminder',
         read: false,
-        actionTab: 'calendar',
-      });
-    }
-  });
-
-  // 4. Scheduled collection alarms (e.g. 1 Dec 2026 Father collection)
-  events.forEach((evt) => {
-    if (evt.isAlarmEnabled && !isDuplicate(`🔔 Collection Alarm: ${evt.title}`)) {
-      newAlerts.push({
-        id: `alarm-${evt.id}`,
-        title: `🔔 Collection Alarm: ${evt.title}`,
-        message: `Scheduled for ${evt.date}. Collecting Rs. ${evt.amount?.toLocaleString() || '25,000'} achieves Rs. 121,000 in total savings (+Rs. 1,000 above your 2-Month Rs. 120,000 goal).`,
-        timestamp: new Date().toISOString(),
-        type: 'reminder',
-        read: false,
-        actionTab: 'calendar',
+        type: 'loan',
       });
     }
   });

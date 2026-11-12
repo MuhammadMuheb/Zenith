@@ -39,13 +39,13 @@ export async function enrollBiometrics(userId: string = 'zenith-user'): Promise<
   const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
     challenge,
     rp: {
-      name: 'Zenith Workspace E2EE Vault',
+      name: 'Zenith Simple Money App',
       id: window.location.hostname || 'localhost',
     },
     user: {
       id: userIdBytes,
       name: 'user@zenith.local',
-      displayName: 'Zenith Vault User',
+      displayName: 'Zenith User',
     },
     pubKeyCredParams: [
       { alg: -7, type: 'public-key' }, // ES256
@@ -69,6 +69,18 @@ export async function enrollBiometrics(userId: string = 'zenith-user'): Promise<
   }
 
   return credential.id;
+}
+
+export async function registerBiometrics(
+  userName: string = 'User'
+): Promise<{ success: boolean; credentialId?: string }> {
+  try {
+    const credentialId = await enrollBiometrics(userName);
+    return { success: true, credentialId };
+  } catch (err) {
+    console.warn('Biometric enrollment skipped or unsupported:', err);
+    return { success: false };
+  }
 }
 
 // Authenticate via Biometric scan
@@ -105,7 +117,6 @@ export async function authenticateWithBiometrics(credentialId?: string): Promise
     });
     return !!assertion;
   } catch (err: unknown) {
-    // If the browser/device rejects WebAuthn (e.g. simulated environment), report friendly error
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(msg || 'Biometric verification failed.');
   }

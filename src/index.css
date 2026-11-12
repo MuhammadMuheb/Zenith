@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant light (&:where(.light, .light *));
+@custom-variant oled (&:where(.oled, .oled *));
+
 @layer base {
   :root {
     --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -11,6 +15,31 @@
     min-height: 100vh;
     overflow-x: hidden;
   }
+}
+
+/* Subtle Film Grain / Noise Overlay for tactile executive feel */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  content: "";
+  pointer-events: none;
+  z-index: 9999;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  mix-blend-mode: overlay;
+  opacity: 0.035;
+}
+
+.light .noise-overlay {
+  opacity: 0.022;
+  mix-blend-mode: multiply;
+}
+
+.oled .noise-overlay {
+  opacity: 0.045;
+  mix-blend-mode: overlay;
 }
 
 /* Custom scrollbars */
@@ -29,13 +58,140 @@
   background: rgba(156, 163, 175, 0.4);
 }
 
-/* Print styles for exportable monthly reports */
+/* ==========================================================================
+   THEME STYLES (Dark, Light, OLED)
+   ========================================================================== */
+
+/* 1. Light Mode: Clean editorial paper canvas, crisp slate surfaces */
+.light {
+  color-scheme: light;
+}
+
+.light body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+.light .bg-neutral-950 {
+  background-color: #f8fafc !important;
+}
+
+.light .bg-neutral-900 {
+  background-color: #ffffff !important;
+}
+
+.light .bg-neutral-900\/90,
+.light .bg-neutral-900\/80,
+.light .bg-neutral-900\/60,
+.light .bg-neutral-900\/40,
+.light .bg-neutral-900\/30 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.light .bg-neutral-800,
+.light .bg-neutral-800\/90,
+.light .bg-neutral-800\/80,
+.light .bg-neutral-800\/60,
+.light .bg-neutral-800\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+.light .bg-neutral-950\/80,
+.light .bg-neutral-950\/60,
+.light .bg-neutral-950\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+.light .border-neutral-800,
+.light .border-neutral-800\/80,
+.light .border-neutral-800\/60,
+.light .border-neutral-700,
+.light .border-neutral-700\/80,
+.light .border-neutral-700\/60 {
+  border-color: #e2e8f0 !important;
+}
+
+.light .divide-neutral-800,
+.light .divide-neutral-800\/80,
+.light .divide-neutral-800\/60 {
+  border-color: #e2e8f0 !important;
+}
+
+.light .text-white,
+.light .text-neutral-100 {
+  color: #0f172a !important;
+}
+
+.light .text-neutral-200,
+.light .text-neutral-300 {
+  color: #334155 !important;
+}
+
+.light .text-neutral-400 {
+  color: #64748b !important;
+}
+
+.light .text-neutral-500 {
+  color: #94a3b8 !important;
+}
+
+/* 2. OLED Mode: True Pitch Black #000000 for infinite contrast */
+.oled {
+  color-scheme: dark;
+}
+
+.oled body {
+  background-color: #000000;
+  color: #f8fafc;
+}
+
+.oled .bg-neutral-950 {
+  background-color: #000000 !important;
+}
+
+.oled .bg-neutral-900 {
+  background-color: #040404 !important;
+}
+
+.oled .bg-neutral-900\/90,
+.oled .bg-neutral-900\/80,
+.oled .bg-neutral-900\/60,
+.oled .bg-neutral-900\/40,
+.oled .bg-neutral-900\/30 {
+  background-color: rgba(4, 4, 4, 0.95) !important;
+}
+
+.oled .bg-neutral-800,
+.oled .bg-neutral-800\/90,
+.oled .bg-neutral-800\/80,
+.oled .bg-neutral-800\/60,
+.oled .bg-neutral-800\/40 {
+  background-color: #0a0a0a !important;
+}
+
+.oled .border-neutral-800,
+.oled .border-neutral-800\/80,
+.oled .border-neutral-800\/60,
+.oled .border-neutral-700,
+.oled .border-neutral-700\/80,
+.oled .border-neutral-700\/60 {
+  border-color: #1a1a1a !important;
+}
+
+.oled .divide-neutral-800,
+.oled .divide-neutral-800\/80,
+.oled .divide-neutral-800\/60 {
+  border-color: #1a1a1a !important;
+}
+
+/* Print styles for reports */
 @media print {
   body {
     background: white !important;
     color: black !important;
   }
-  .no-print {
+  .no-print,
+  .noise-overlay {
     display: none !important;
   }
   .print-only {

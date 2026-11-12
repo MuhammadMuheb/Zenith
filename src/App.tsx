@@ -1,305 +1,155 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Note,
-  CalendarEvent,
-  SalaryConfig,
-  BudgetItem,
-  CategoryAllocation,
+  UserProfile,
+  SimpleMoneyEntry,
+  MonthBook,
+  SmartNote,
+  AppSettings,
+  SalaryBreakdownConfig,
   AppNotification,
-  SecuritySettings,
-  DeviceSyncStatus,
-  AppThemeMode,
-  AccentColor,
-  SavingsGoal,
-  SupportedCurrency,
-  MonthExpenseItem,
-  PersonDebtRecord,
-  MonthlyAccountRecord,
+  DetectedMoneyPrompt,
 } from './types';
 import {
-  INITIAL_NOTES,
-  INITIAL_CALENDAR_EVENTS,
-  INITIAL_SALARY_CONFIG,
-  INITIAL_BUDGET_ITEMS,
-  INITIAL_CATEGORIES,
-  INITIAL_SECURITY,
-  INITIAL_SYNC_DEVICES,
-  INITIAL_SAVINGS_GOALS,
-  INITIAL_MONTH_EXPENSES,
-  INITIAL_DEBT_RECORDS,
-  INITIAL_MONTHLY_ACCOUNTS,
-  STORAGE_KEYS,
-  loadFromStorage,
-  saveToStorage,
+  getActiveUserId,
+  setActiveUserId,
+  getAllUsers,
+  saveAllUsers,
+  loadUserData,
+  saveUserData,
+  createFreshUserData,
+  DEFAULT_SETTINGS,
+  DEFAULT_SALARY_CONFIG,
+  UserVaultData,
 } from './services/storage';
-import { calculateSalaryBreakdown } from './services/salaryMath';
 import {
-  evaluateAutoNotifications,
-  playChimeSound,
-  requestNotificationPermission,
-  sendBrowserNotification,
-} from './services/notifications';
+  ensureMonthBook,
+  checkAndAutoLockMonths,
+  getMonthKeyFromDate,
+} from './services/monthEngine';
+import { playChimeSound, checkLoanAlarms } from './services/notifications';
 
-import { Navbar } from './components/Navbar';
-import { NavigationTabs } from './components/NavigationTabs';
-import { MoneyAccountView } from './components/MoneyAccountView';
-import { generateMasterFinancialNote, syncDebtsToCalendarEvents } from './services/financialSync';
-import { NotesView } from './components/NotesView';
-import { CalendarView } from './components/CalendarView';
-import { SalaryView } from './components/SalaryView';
-import { BudgetView } from './components/BudgetView';
-import { SavingsCalculatorView } from './components/SavingsCalculatorView';
-import { ArchitectureView } from './components/ArchitectureView';
+// Components
+import { AuthView } from './components/AuthView';
 import { LockScreen } from './components/LockScreen';
-import { SecurityModal } from './components/SecurityModal';
-
+import {
+  DesktopSidebar,
+  MobileHeader,
+  MobileBottomBar,
+  MobileDrawer,
+  TabKey,
+} from './components/Navigation';
+import { AddEntryModal } from './components/AddEntryModal';
+import { HomeView } from './components/HomeView';
+import { MonthlyView } from './components/MonthlyView';
+import { DailyView } from './components/DailyView';
+import { SavingsView } from './components/SavingsView';
+import { NotesView } from './components/NotesView';
+import { SalaryView } from './components/SalaryView';
+import { SettingsView } from './components/SettingsView';
 
 export default function App() {
-  // Persistent States
-  const [notes, setNotes] = useState<Note[]>(() =>
-    loadFromStorage(STORAGE_KEYS.NOTES, INITIAL_NOTES)
-  );
-  const [events, setEvents] = useState<CalendarEvent[]>(() => {
-    const loaded = loadFromStorage(STORAGE_KEYS.CALENDAR, INITIAL_CALENDAR_EVENTS);
-    const hasOct1 = loaded.some((e) => e.date === '2026-10-01' && (e.receivablePerson?.includes('Father') || e.title.includes('Father')));
-    const hasNov1 = loaded.some((e) => e.date === '2026-11-01' && (e.receivablePerson?.includes('Father') || e.title.includes('Father')));
-    let result = [...loaded];
-    if (!hasOct1) {
-      result.push({
-        id: 'evt-collect-papa-oct1',
-        title: '🔔 1 Oct 2026: Milestone Recovery Check-in (Father / Papa)',
-        description: 'First scheduled milestone reminder and alarm for Rs. 25,000 loan given to Father.',
-        date: '2026-10-01',
-        time: '09:00',
-        type: 'salary',
-        color: '#8b5cf6',
-        amount: 25000,
-        isCompleted: false,
-        isAlarmEnabled: true,
-        receivablePerson: 'Father (Papa)',
-      });
-    }
-    if (!hasNov1) {
-      result.push({
-        id: 'evt-collect-papa-nov1',
-        title: '🔔 1 Nov 2026: 30-Day Pre-Due Alarm (Father / Papa)',
-        description: 'Second scheduled milestone reminder and alarm for Rs. 25,000 loan given to Father.',
-        date: '2026-11-01',
-        time: '09:00',
-        type: 'salary',
-        color: '#8b5cf6',
-        amount: 25000,
-        isCompleted: false,
-        isAlarmEnabled: true,
-        receivablePerson: 'Father (Papa)',
-      });
-    }
-    return result;
+  // 1. User & Authentication State
+  const [allUsers, setAllUsers] = useState<UserProfile[]>(() => getAllUsers());
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    const activeId = getActiveUserId();
+    if (!activeId) return null;
+    const users = getAllUsers();
+    return users.find((u) => u.id === activeId) || null;
   });
-  const [salaryConfig, setSalaryConfig] = useState<SalaryConfig>(() =>
-    loadFromStorage(STORAGE_KEYS.SALARY, INITIAL_SALARY_CONFIG)
-  );
-  const [budgetItems, setBudgetItems] = useState<BudgetItem[]>(() =>
-    loadFromStorage(STORAGE_KEYS.BUDGET, INITIAL_BUDGET_ITEMS)
-  );
-  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() =>
-    loadFromStorage(STORAGE_KEYS.SAVINGS_GOALS, INITIAL_SAVINGS_GOALS)
-  );
-  const [activeCurrency, setActiveCurrency] = useState<SupportedCurrency>(() =>
-    loadFromStorage<SupportedCurrency>(STORAGE_KEYS.CURRENCY, 'PKR')
-  );
-  const [currencyRates, setCurrencyRates] = useState<Record<SupportedCurrency, number>>(() =>
-    loadFromStorage(STORAGE_KEYS.CURRENCY_RATES, {
-      USD: 1.0,
-      PKR: 278.5,
-      EGP: 49.3,
-      EUR: 0.92,
-      GBP: 0.79,
-    })
-  );
-  const [monthExpenses, setMonthExpenses] = useState<MonthExpenseItem[]>(() =>
-    loadFromStorage(STORAGE_KEYS.EXPENSE_ITEMS, INITIAL_MONTH_EXPENSES)
-  );
-  const [debtRecords, setDebtRecords] = useState<PersonDebtRecord[]>(() => {
-    const loaded = loadFromStorage(STORAGE_KEYS.DEBT_RECORDS, INITIAL_DEBT_RECORDS);
-    return loaded.map((d) => {
-      if (d.id === 'debt-1' || d.personName.toLowerCase().includes('father')) {
-        if (!d.milestones || d.milestones.length === 0) {
-          return {
-            ...d,
-            milestones: [
-              {
-                id: 'm-oct1-2026',
-                date: '2026-10-01',
-                label: '1 Oct 2026 Advance Recovery Check-in & Alarm',
-                isAlarmEnabled: true,
-                status: 'pending' as const,
-              },
-              {
-                id: 'm-nov1-2026',
-                date: '2026-11-01',
-                label: '1 Nov 2026 30-Day Pre-Due Follow-up Alarm',
-                isAlarmEnabled: true,
-                status: 'pending' as const,
-              },
-              {
-                id: 'm-dec1-2026',
-                date: '2026-12-01',
-                label: '1 Dec 2026 Final Settlement: Full Rs. 25,000 Recovery Alarm',
-                amount: 25000,
-                isAlarmEnabled: true,
-                status: 'pending' as const,
-              },
-            ],
-          };
-        }
-      }
-      return d;
-    });
-  });
-  const [monthlyAccounts, setMonthlyAccounts] = useState<MonthlyAccountRecord[]>(() =>
-    loadFromStorage(STORAGE_KEYS.MONTHLY_ACCOUNTS, INITIAL_MONTHLY_ACCOUNTS)
-  );
-  const [categoryLimits] = useState<CategoryAllocation[]>(() =>
-    loadFromStorage(STORAGE_KEYS.CATEGORIES, INITIAL_CATEGORIES)
-  );
-  const [security, setSecurity] = useState<SecuritySettings>(() =>
-    loadFromStorage(STORAGE_KEYS.SECURITY, INITIAL_SECURITY)
-  );
-  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
-    loadFromStorage(STORAGE_KEYS.NOTIFICATIONS, [])
-  );
-  const [syncDevices, setSyncDevices] = useState<DeviceSyncStatus[]>(() =>
-    loadFromStorage(STORAGE_KEYS.SYNC_DEVICES, INITIAL_SYNC_DEVICES)
-  );
-  const [themeMode, setThemeMode] = useState<AppThemeMode>(() =>
-    loadFromStorage(STORAGE_KEYS.THEME, 'dark')
-  );
-  const [accent, setAccent] = useState<AccentColor>(() =>
-    loadFromStorage(STORAGE_KEYS.ACCENT, 'emerald')
+
+  const [isLocked, setIsLocked] = useState<boolean>(false);
+
+  // 2. User Vault States (All initialized to empty zero)
+  const [entries, setEntries] = useState<SimpleMoneyEntry[]>([]);
+  const [monthBooks, setMonthBooks] = useState<MonthBook[]>([]);
+  const [notes, setNotes] = useState<SmartNote[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [salaryConfig, setSalaryConfig] = useState<SalaryBreakdownConfig>(DEFAULT_SALARY_CONFIG);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  // 3. Navigation & Modal States
+  const [currentTab, setCurrentTab] = useState<TabKey>('home');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addModalInitialType, setAddModalInitialType] = useState<
+    'money_in' | 'expense' | 'lent' | 'borrowed' | 'returned'
+  >('expense');
+
+  // Active / Selected month defaults to current actual month
+  const todayMonthKey = useMemo(() => new Date().toISOString().substring(0, 7), []);
+  const [selectedMonthlyKey, setSelectedMonthlyKey] = useState<string>(() =>
+    new Date().toISOString().substring(0, 7)
   );
 
-  // App Navigation & UI state
-  const [currentTab, setCurrentTab] = useState<string>('account');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isMobileFrame, setIsMobileFrame] = useState<boolean>(false);
-  const [showSecurityModal, setShowSecurityModal] = useState<boolean>(false);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-
-
-  // Compute calculated Net Monthly Income from salary configuration
-  const salaryBreakdown = useMemo(() => calculateSalaryBreakdown(salaryConfig), [salaryConfig]);
-  const netMonthlyIncome = salaryBreakdown.netMonthly;
-
-  // Persist states
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.NOTES, notes);
-  }, [notes]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.CALENDAR, events);
-  }, [events]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.SALARY, salaryConfig);
-  }, [salaryConfig]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.BUDGET, budgetItems);
-  }, [budgetItems]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.SECURITY, security);
-  }, [security]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.NOTIFICATIONS, notifications);
-  }, [notifications]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.THEME, themeMode);
-  }, [themeMode]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.ACCENT, accent);
-  }, [accent]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.SAVINGS_GOALS, savingsGoals);
-  }, [savingsGoals]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.CURRENCY, activeCurrency);
-  }, [activeCurrency]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.CURRENCY_RATES, currencyRates);
-  }, [currencyRates]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.EXPENSE_ITEMS, monthExpenses);
-  }, [monthExpenses]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.DEBT_RECORDS, debtRecords);
-  }, [debtRecords]);
-
-  useEffect(() => {
-    saveToStorage(STORAGE_KEYS.MONTHLY_ACCOUNTS, monthlyAccounts);
-  }, [monthlyAccounts]);
-
-  // Automatic Two-Way Synchronization: Ledger -> Master Notepad Note & Calendar Alarms
-  useEffect(() => {
-    // 1. Auto-sync to Master Financial Notepad Note in Google Keep / Notes
-    const updatedMasterNote = generateMasterFinancialNote(monthExpenses, debtRecords);
-    setNotes((prev) => {
-      const existingIdx = prev.findIndex((n) => n.id === 'note-master-financial');
-      if (existingIdx >= 0) {
-        const copy = [...prev];
-        copy[existingIdx] = {
-          ...copy[existingIdx],
-          content: updatedMasterNote.content,
-          checklist: updatedMasterNote.checklist,
-          updatedAt: new Date().toISOString(),
-        };
-        return copy;
-      } else {
-        return [updatedMasterNote, ...prev];
-      }
-    });
-
-    // 2. Auto-sync loans receivable with return dates to Calendar alarm events
-    setEvents((prev) => syncDebtsToCalendarEvents(debtRecords, prev));
-  }, [monthExpenses, debtRecords]);
-
-  // Smart Auto-Notification Engine evaluation
-  useEffect(() => {
-    const newAlerts = evaluateAutoNotifications(salaryConfig, budgetItems, events, notifications);
-    if (newAlerts.length > 0) {
-      setNotifications((prev) => [...newAlerts, ...prev]);
-      // Play audio chime and trigger browser native notification
-      playChimeSound('alert');
-      newAlerts.forEach((a) => {
-        sendBrowserNotification(a.title, { body: a.message });
-      });
+  // Load active user's vault data (pure zero if new/reset)
+  const loadActiveUserData = useCallback((user: UserProfile) => {
+    let data = loadUserData(user.id);
+    if (!data) {
+      data = createFreshUserData(user);
+      saveUserData(user.id, data);
     }
-  }, [salaryConfig, budgetItems, events]);
 
-  // Request browser notification permission once
-  useEffect(() => {
-    requestNotificationPermission();
+    // Auto-lock past months if any exist
+    const { updatedBooks, notifications: lockNotifs } = checkAndAutoLockMonths(
+      data.monthBooks || [],
+      data.entries || []
+    );
+
+    setEntries(data.entries || []);
+    setMonthBooks(updatedBooks || []);
+    setNotes(data.notes || []);
+    setSettings(data.settings || DEFAULT_SETTINGS);
+    setSalaryConfig(data.salaryConfig || DEFAULT_SALARY_CONFIG);
+    setNotifications([...lockNotifs, ...(data.notifications || [])]);
+
+    // Apply theme
+    const theme = data.settings?.theme || 'dark';
+    document.documentElement.classList.remove('dark', 'light', 'oled');
+    document.documentElement.classList.add(theme);
   }, []);
 
-  // Inactivity Auto-Lock Timer
+  // Initialize vault on startup
   useEffect(() => {
-    if (security.autoLockMinutes <= 0) return;
+    if (currentUser) {
+      loadActiveUserData(currentUser);
+    }
+  }, [currentUser, loadActiveUserData]);
+
+  // Persist vault changes to user's storage slot
+  useEffect(() => {
+    if (!currentUser) return;
+    const data: UserVaultData = {
+      profile: currentUser,
+      entries,
+      monthBooks,
+      notes,
+      settings,
+      salaryConfig,
+      notifications,
+    };
+    saveUserData(currentUser.id, data);
+  }, [currentUser, entries, monthBooks, notes, settings, salaryConfig, notifications]);
+
+  // Check daily loan alarms
+  useEffect(() => {
+    if (!currentUser || entries.length === 0) return;
+    const newAlarms = checkLoanAlarms(entries, notifications);
+    if (newAlarms.length > 0) {
+      setNotifications((prev) => [...newAlarms, ...prev]);
+      playChimeSound('alert');
+    }
+  }, [currentUser, entries, notifications]);
+
+  // Inactivity auto-lock
+  useEffect(() => {
+    if (!currentUser || settings.autoLockMinutes <= 0 || isLocked) return;
 
     let timeoutId: number;
     const resetTimer = () => {
       window.clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
-        setSecurity((prev) => ({ ...prev, isLocked: true }));
-      }, security.autoLockMinutes * 60 * 1000);
+        setIsLocked(true);
+      }, settings.autoLockMinutes * 60 * 1000);
     };
 
     const eventsToListen = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
@@ -310,487 +160,408 @@ export default function App() {
       window.clearTimeout(timeoutId);
       eventsToListen.forEach((name) => window.removeEventListener(name, resetTimer));
     };
-  }, [security.autoLockMinutes, security.isLocked]);
+  }, [currentUser, settings.autoLockMinutes, isLocked]);
 
-  // Simulated Cloud Sync
-  const handleTriggerSync = () => {
-    setIsSyncing(true);
+  // Handle Authentication completion
+  const handleCompleteAuth = (user: UserProfile) => {
+    const existing = allUsers.find((u) => u.id === user.id);
+    const updatedUsers = existing
+      ? allUsers.map((u) => (u.id === user.id ? user : u))
+      : [...allUsers, user];
+
+    setAllUsers(updatedUsers);
+    saveAllUsers(updatedUsers);
+    setActiveUserId(user.id);
+    setCurrentUser(user);
+    loadActiveUserData(user);
+    setIsLocked(false);
+    setCurrentTab('home');
     playChimeSound('success');
-    setTimeout(() => {
-      setIsSyncing(false);
-      setSyncDevices((prev) =>
-        prev.map((d) => ({
-          ...d,
-          lastSynced: d.isCurrentDevice ? 'Just now' : 'Synced 1m ago',
-        }))
-      );
-    }, 1200);
   };
 
-  // Note Handlers
-  const handleAddNote = (newNoteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const newNote: Note = {
-      ...newNoteData,
-      id: 'note-' + Date.now(),
+  // Handle Log out
+  const handleLogout = () => {
+    setActiveUserId(null);
+    setCurrentUser(null);
+    setIsLocked(false);
+  };
+
+  // Handle Add Entry
+  const handleAddEntry = (entryData: Omit<SimpleMoneyEntry, 'id' | 'createdAt' | 'userId'>) => {
+    if (!currentUser) return;
+
+    const newEntry: SimpleMoneyEntry = {
+      ...entryData,
+      id: 'entry-' + Date.now(),
+      userId: currentUser.id,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     };
-    setNotes((prev) => [newNote, ...prev]);
-    playChimeSound('success');
-  };
 
-  const handleUpdateNote = (id: string, updates: Partial<Note>) => {
-    setNotes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n))
+    // Ensure month book exists
+    const updatedBooks = ensureMonthBook(
+      entryData.monthKey,
+      monthBooks,
+      entries,
+      entryData.savingsGoalSet || 0
     );
-  };
 
-  const handleDeleteNote = (id: string, permanent: boolean = false) => {
-    if (permanent) {
-      setNotes((prev) => prev.filter((n) => n.id !== id));
-    } else {
-      setNotes((prev) =>
-        prev.map((n) =>
-          n.id === id ? { ...n, isTrash: true, updatedAt: new Date().toISOString() } : n
-        )
+    // If money returned, mark linked loan as cleared
+    let updatedEntries = [newEntry, ...entries];
+    if (entryData.type === 'returned' && entryData.linkedLoanId) {
+      updatedEntries = updatedEntries.map((e) =>
+        e.id === entryData.linkedLoanId ? { ...e, isCleared: true } : e
       );
     }
+
+    setEntries(updatedEntries);
+    setMonthBooks(updatedBooks);
+    playChimeSound('success');
   };
 
-  const handleRestoreNote = (id: string) => {
-    setNotes((prev) =>
-      prev.map((n) =>
-        n.id === id ? { ...n, isTrash: false, updatedAt: new Date().toISOString() } : n
+  // Handle Delete Entry - permanently removes and never resurrects
+  const handleDeleteEntry = (id: string) => {
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  // Handle Adding Extra Spending to Next Month's Savings Goal
+  const handleAddExtraToGoal = (extraAmount: number) => {
+    setMonthBooks((prev) =>
+      prev.map((b) =>
+        b.monthKey === selectedMonthlyKey
+          ? {
+              ...b,
+              goal: b.goal + extraAmount,
+              target: b.target + extraAmount,
+            }
+          : b
       )
     );
-  };
-
-  // Calendar Event Handlers
-  const handleAddEvent = (eventData: Omit<CalendarEvent, 'id'>) => {
-    const newEvent: CalendarEvent = {
-      ...eventData,
-      id: 'evt-' + Date.now(),
-    };
-    setEvents((prev) => [...prev, newEvent]);
     playChimeSound('success');
   };
 
-  const handleUpdateEvent = (id: string, updates: Partial<CalendarEvent>) => {
-    setEvents((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)));
+  // Handle Withdraw from Locked Month
+  const handleWithdrawFromLockedMonth = (monthKey: string, amount: number) => {
+    setMonthBooks((prev) =>
+      prev.map((b) => {
+        if (b.monthKey === monthKey) {
+          const currentTaken = b.takenBackAmount || 0;
+          return {
+            ...b,
+            takenBackAmount: currentTaken + amount,
+          };
+        }
+        if (b.monthKey === selectedMonthlyKey || b.monthKey === todayMonthKey) {
+          return {
+            ...b,
+            stillToSaveFromBefore: (b.stillToSaveFromBefore || 0) + amount,
+            target: b.goal + (b.stillToSaveFromBefore || 0) + amount,
+          };
+        }
+        return b;
+      })
+    );
+    playChimeSound('alert');
   };
 
-  const handleDeleteEvent = (id: string) => {
-    setEvents((prev) => prev.filter((e) => e.id !== id));
-  };
+  // Notes smart detector confirmation
+  const handleConfirmDetectedTransaction = (noteId: string, prompt: DetectedMoneyPrompt) => {
+    if (!currentUser) return;
 
-  // Salary Handlers
-  const handleUpdateSalaryConfig = (updates: Partial<SalaryConfig>) => {
-    setSalaryConfig((prev) => ({ ...prev, ...updates }));
-  };
-
-  const handleAddSalaryHistory = (entry: {
-    title: string;
-    date: string;
-    annualEquivalent: number;
-    notes?: string;
-  }) => {
-    const newEntry = {
-      id: 'raise-' + Date.now(),
-      ...entry,
-    };
-    setSalaryConfig((prev) => ({
-      ...prev,
-      baseSalary:
-        prev.payPeriod === 'annually' ? entry.annualEquivalent : prev.baseSalary,
-      history: [newEntry, ...prev.history],
-    }));
-    playChimeSound('success');
-  };
-
-  // Budget Handlers
-  const handleAddBudgetItem = (itemData: Omit<BudgetItem, 'id'>) => {
-    const newItem: BudgetItem = {
-      ...itemData,
-      id: 'b-' + Date.now(),
-    };
-    setBudgetItems((prev) => [newItem, ...prev]);
-    playChimeSound('success');
-  };
-
-  const handleUpdateBudgetItem = (id: string, updates: Partial<BudgetItem>) => {
-    setBudgetItems((prev) => prev.map((b) => (b.id === id ? { ...b, ...updates } : b)));
-  };
-
-  const handleDeleteBudgetItem = (id: string) => {
-    setBudgetItems((prev) => prev.filter((b) => b.id !== id));
-  };
-
-  // Savings Goals Handlers
-  const handleAddSavingsGoal = (goalData: Omit<SavingsGoal, 'id' | 'createdAt'>) => {
-    const newGoal: SavingsGoal = {
-      ...goalData,
-      id: 'goal-' + Date.now(),
+    // Create entry in ledger
+    const newEntry: SimpleMoneyEntry = {
+      id: 'entry-detected-' + Date.now(),
+      userId: currentUser.id,
+      type: prompt.type,
+      amount: prompt.amount,
+      date: prompt.date,
+      monthKey: getMonthKeyFromDate(prompt.date),
+      whatFor: prompt.personOrCategory,
+      person: prompt.type === 'lent' || prompt.type === 'borrowed' ? prompt.personOrCategory : undefined,
       createdAt: new Date().toISOString(),
     };
-    setSavingsGoals((prev) => [newGoal, ...prev]);
-    playChimeSound('success');
-  };
 
-  const handleUpdateSavingsGoal = (id: string, updates: Partial<SavingsGoal>) => {
-    setSavingsGoals((prev) => prev.map((g) => (g.id === id ? { ...g, ...updates } : g)));
-  };
+    setEntries((prev) => [newEntry, ...prev]);
 
-  const handleDeleteSavingsGoal = (id: string) => {
-    setSavingsGoals((prev) => prev.filter((g) => g.id !== id));
-  };
-
-  const handleSyncGoalToBudget = (goal: SavingsGoal) => {
-    const existing = budgetItems.find((b) => b.title === goal.title);
-    if (existing) {
-      handleUpdateBudgetItem(existing.id, { amount: goal.monthlyContribution });
-    } else {
-      handleAddBudgetItem({
-        title: goal.title,
-        amount: goal.monthlyContribution,
-        category: 'Savings & Investments',
-        bucket: 'savings',
-        date: new Date().toISOString().split('T')[0],
-        isRecurring: true,
-        dueDate: 1,
-        isPaid: false,
-        paymentMethod: 'Bank Transfer',
-        notes: `Linked to Savings Goal (${goal.category})`,
-      });
-    }
-  };
-
-  // Month Expenses Handlers
-  const handleAddMonthExpense = (itemData: Omit<MonthExpenseItem, 'id'>) => {
-    const newItem: MonthExpenseItem = {
-      ...itemData,
-      id: 'exp-' + Date.now(),
-    };
-    setMonthExpenses((prev) => [newItem, ...prev]);
-    playChimeSound('success');
-  };
-
-  const handleDeleteMonthExpense = (id: string) => {
-    setMonthExpenses((prev) => prev.filter((e) => e.id !== id));
-  };
-
-  // Debt & Loan Records Handlers (Loans, Due Dates & Repayments)
-  const handleAddDebtRecord = (recordData: Omit<PersonDebtRecord, 'id'>) => {
-    const newRecord: PersonDebtRecord = {
-      ...recordData,
-      id: 'debt-' + Date.now(),
-    };
-    setDebtRecords((prev) => [newRecord, ...prev]);
-    playChimeSound('success');
-  };
-
-  const handleUpdateDebtRecord = (id: string, updates: Partial<PersonDebtRecord>) => {
-    setDebtRecords((prev) => prev.map((d) => (d.id === id ? { ...d, ...updates } : d)));
-  };
-
-  const handleDeleteDebtRecord = (id: string) => {
-    setDebtRecords((prev) => prev.filter((d) => d.id !== id));
-  };
-
-  // Restore Entire Vault Handler
-  const handleRestoreVault = (data: {
-    notes: Note[];
-    budget: BudgetItem[];
-    salary: SalaryConfig;
-  }) => {
-    if (data.notes) setNotes(data.notes);
-    if (data.budget) setBudgetItems(data.budget);
-    if (data.salary) setSalaryConfig(data.salary);
-    playChimeSound('payday');
-  };
-
-  // Notification handlers
-  const handleMarkNotificationRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    // Update note prompt to confirmed
+    setNotes((prev) =>
+      prev.map((n) =>
+        n.id === noteId && n.detectedPrompt
+          ? {
+              ...n,
+              detectedPrompt: { ...n.detectedPrompt, confirmed: true },
+            }
+          : n
+      )
     );
+
+    playChimeSound('success');
   };
 
-  const handleClearAllNotifications = () => {
+  const handleEditDetectedTransaction = (prompt: DetectedMoneyPrompt) => {
+    setAddModalInitialType(prompt.type);
+    setShowAddModal(true);
+  };
+
+  // Settings Handlers
+  const handleUpdateSettings = (updates: Partial<AppSettings>) => {
+    setSettings((prev) => {
+      const next = { ...prev, ...updates };
+      if (updates.theme) {
+        document.documentElement.classList.remove('dark', 'light', 'oled');
+        document.documentElement.classList.add(updates.theme);
+      }
+      return next;
+    });
+  };
+
+  const handleUpdateUserPin = (newPinHash: string) => {
+    if (!currentUser) return;
+    const updatedUser = { ...currentUser, pinHash: newPinHash };
+    setCurrentUser(updatedUser);
+    setAllUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    saveAllUsers(allUsers.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+  };
+
+  const handleToggleBiometrics = (enabled: boolean) => {
+    if (!currentUser) return;
+    const updatedUser = { ...currentUser, biometricsEnabled: enabled };
+    setCurrentUser(updatedUser);
+    setAllUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    saveAllUsers(allUsers.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+  };
+
+  // Reset ALL account data to pure zero
+  const handleResetAccountData = () => {
+    if (!currentUser) return;
+    setEntries([]);
+    setMonthBooks([]);
+    setNotes([]);
     setNotifications([]);
+    setSalaryConfig(DEFAULT_SALARY_CONFIG);
+    const fresh = createFreshUserData(currentUser);
+    saveUserData(currentUser.id, fresh);
+    playChimeSound('alert');
   };
 
-  // Theming classes
-  const getThemeBackgroundClass = () => {
-    if (themeMode === 'light') return 'bg-neutral-100 text-neutral-900';
-    if (themeMode === 'oled') return 'bg-black text-neutral-100';
-    return 'bg-neutral-950 text-neutral-100';
-  };
+  // If not logged in, show AuthView
+  if (!currentUser) {
+    return <AuthView existingUsers={allUsers} onCompleteAuth={handleCompleteAuth} />;
+  }
 
-  // Active counts for badges
-  const activeNotesCount = notes.filter((n) => !n.isArchived && !n.isTrash).length;
-  const unpaidBillsCount = budgetItems.filter((b) => b.isRecurring && !b.isPaid).length;
-
-  const walletBalanceBadge = useMemo(() => {
-    const prevSpent = monthExpenses
-      .filter((e) => e.monthPeriod === 'previous')
-      .reduce((sum, item) => sum + item.amount, 0);
-    const currSpent = monthExpenses
-      .filter((e) => e.monthPeriod === 'current')
-      .reduce((sum, item) => sum + item.amount, 0);
-    const prevCarry = 80000 - prevSpent;
-    const currentBalance = prevCarry + 80000 - currSpent;
-    return `Rs. ${Math.round(currentBalance / 1000)}k`;
-  }, [monthExpenses]);
+  // Active month book helper for Add Modal
+  const activeBook = monthBooks.find((b) => b.monthKey === selectedMonthlyKey);
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${getThemeBackgroundClass()}`}>
-      {/* Biometric & PIN Lock Screen Overlay */}
-      {security.isLocked && (
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col md:flex-row relative">
+      {/* Subtle Grain Noise Overlay */}
+      <div className="noise-overlay" aria-hidden="true" />
+
+      {/* Lock Screen */}
+      {isLocked && (
         <LockScreen
-          pinHash={security.pinHash}
-          biometricsEnabled={security.biometricsEnabled}
-          biometricCredentialId={security.biometricCredentialId}
-          onUnlock={() => setSecurity((prev) => ({ ...prev, isLocked: false }))}
+          pinHash={currentUser.pinHash}
+          biometricsEnabled={currentUser.biometricsEnabled}
+          biometricCredentialId={currentUser.biometricCredentialId}
+          userName={currentUser.name}
+          onUnlock={() => setIsLocked(false)}
+          onLogout={handleLogout}
         />
       )}
 
-      {/* Security & Vault Settings Modal */}
-      {showSecurityModal && (
-        <SecurityModal
-          security={security}
-          onUpdateSecurity={(updates) => setSecurity((prev) => ({ ...prev, ...updates }))}
-          onClose={() => setShowSecurityModal(false)}
-          syncDevices={syncDevices}
-          onTriggerSync={handleTriggerSync}
-          isSyncing={isSyncing}
+      {/* Add Entry Modal (Single button from Section 4) */}
+      {showAddModal && (
+        <AddEntryModal
+          currentMonthKey={selectedMonthlyKey}
+          initialType={addModalInitialType}
+          stillToSaveFromBefore={activeBook?.stillToSaveFromBefore || 0}
+          currentMonthGoal={activeBook?.goal || 0}
+          activeCurrency={settings.currency}
+          existingLoans={entries}
+          onAddEntry={handleAddEntry}
+          onClose={() => setShowAddModal(false)}
         />
       )}
 
-      {/* Top Navbar */}
-      <Navbar
+      {/* Desktop Navigation Sidebar (Left, Tab Names Only, No badges) */}
+      <DesktopSidebar
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        isLocked={security.isLocked}
-        onLockVault={() => setSecurity((prev) => ({ ...prev, isLocked: true }))}
-        onOpenSecurity={() => setShowSecurityModal(true)}
-        notifications={notifications}
-        onMarkNotificationAsRead={handleMarkNotificationRead}
-        onClearAllNotifications={handleClearAllNotifications}
-        themeMode={themeMode}
-        setThemeMode={setThemeMode}
-        accent={accent}
-        setAccent={setAccent}
-        isMobileFrame={isMobileFrame}
-        setIsMobileFrame={setIsMobileFrame}
-        syncDevices={syncDevices}
-        onTriggerSync={handleTriggerSync}
-        isSyncing={isSyncing}
-        activeCurrency={activeCurrency}
-        setActiveCurrency={setActiveCurrency}
-        currencyRates={currencyRates}
-        onUpdateCurrencyRate={(cur, rate) => setCurrencyRates((prev) => ({ ...prev, [cur]: rate }))}
+        onSelectTab={setCurrentTab}
+        labelLanguage={settings.labelLanguage}
+        onOpenAddModal={() => {
+          setAddModalInitialType('expense');
+          setShowAddModal(true);
+        }}
+        currentUser={currentUser}
+        onLockVault={() => setIsLocked(true)}
+        onLogout={handleLogout}
+        isMobileMenuOpen={isMobileMenuOpen}
+        setIsMobileMenuOpen={setIsMobileMenuOpen}
       />
 
-      {/* Navigation Tab Bar */}
-      <NavigationTabs
+      {/* Mobile Top Header */}
+      <MobileHeader
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        accent={accent}
-        notesCount={activeNotesCount}
-        eventsCount={events.length}
-        unpaidBillsCount={unpaidBillsCount}
-        savingsCount={savingsGoals.length}
-        walletBalanceBadge={walletBalanceBadge}
+        onSelectTab={setCurrentTab}
+        labelLanguage={settings.labelLanguage}
+        onOpenAddModal={() => {
+          setAddModalInitialType('expense');
+          setShowAddModal(true);
+        }}
+        currentUser={currentUser}
+        onLockVault={() => setIsLocked(true)}
+        onLogout={handleLogout}
+        isMobileMenuOpen={isMobileMenuOpen}
+        setIsMobileMenuOpen={setIsMobileMenuOpen}
       />
 
+      {/* Mobile Drawer for Notes, Salary, Settings */}
+      <MobileDrawer
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        labelLanguage={settings.labelLanguage}
+        onOpenAddModal={() => {
+          setAddModalInitialType('expense');
+          setShowAddModal(true);
+        }}
+        currentUser={currentUser}
+        onLockVault={() => setIsLocked(true)}
+        onLogout={handleLogout}
+        isMobileMenuOpen={isMobileMenuOpen}
+        setIsMobileMenuOpen={setIsMobileMenuOpen}
+      />
 
-      {/* Content Area with Optional Mobile Phone Simulation Container */}
-      <main className="py-4">
-        {isMobileFrame ? (
-          /* Mobile Device Frame Simulator (iPhone 16 / Android) */
-          <div className="mx-auto my-6 max-w-[420px] rounded-[48px] border-[10px] border-neutral-800 bg-neutral-900 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.8)] overflow-hidden ring-1 ring-neutral-700/50">
-            {/* Dynamic Island / Notch */}
-            <div className="relative bg-neutral-900 pt-3 pb-2 px-6 flex items-center justify-between border-b border-neutral-800/80">
-              <span className="text-xs font-semibold text-neutral-300 font-mono">9:41</span>
-              <div className="h-5 w-28 rounded-full bg-black mx-auto flex items-center justify-end px-2">
-                <span className="h-2 w-2 rounded-full bg-emerald-500/80 animate-pulse" />
-              </div>
-              <div className="flex items-center gap-1.5 text-[10px] text-neutral-400 font-mono">
-                <span>5G</span>
-                <span>100%</span>
-              </div>
-            </div>
+      {/* Main Content Workspace Area */}
+      <main className="flex-1 pb-24 md:pb-8 pt-4 overflow-y-auto">
+        {currentTab === 'home' && (
+          <HomeView
+            currentMonthKey={selectedMonthlyKey}
+            entries={entries}
+            monthBooks={monthBooks}
+            activeCurrency={settings.currency}
+            onOpenAddModal={(type) => {
+              setAddModalInitialType(type || 'expense');
+              setShowAddModal(true);
+            }}
+            onDeleteEntry={handleDeleteEntry}
+            onAddExtraToGoal={handleAddExtraToGoal}
+          />
+        )}
 
-            {/* Inner view container */}
-            <div className="h-[750px] overflow-y-auto px-1 py-2 scrollbar-none">
-              {currentTab === 'account' && (
-                <MoneyAccountView
-                  expenses={monthExpenses}
-                  onAddExpense={handleAddMonthExpense}
-                  onDeleteExpense={handleDeleteMonthExpense}
-                  debtRecords={debtRecords}
-                  onAddDebtRecord={handleAddDebtRecord}
-                  onUpdateDebtRecord={handleUpdateDebtRecord}
-                  onDeleteDebtRecord={handleDeleteDebtRecord}
-                  monthlyAccounts={monthlyAccounts}
-                  activeCurrency={activeCurrency}
-                  currencyRates={currencyRates}
-                />
-              )}
-              {currentTab === 'notes' && (
-                <NotesView
-                  notes={notes}
-                  onAddNote={handleAddNote}
-                  onUpdateNote={handleUpdateNote}
-                  onDeleteNote={handleDeleteNote}
-                  onRestoreNote={handleRestoreNote}
-                  searchQuery={searchQuery}
-                />
-              )}
-              {currentTab === 'calendar' && (
-                <CalendarView
-                  events={events}
-                  onAddEvent={handleAddEvent}
-                  onUpdateEvent={handleUpdateEvent}
-                  onDeleteEvent={handleDeleteEvent}
-                  salaryConfig={salaryConfig}
-                  budgetItems={budgetItems}
-                  notes={notes}
-                  searchQuery={searchQuery}
-                  activeCurrency={activeCurrency}
-                  currencyRates={currencyRates}
-                />
-              )}
-              {currentTab === 'salary' && (
-                <SalaryView
-                  salaryConfig={salaryConfig}
-                  onUpdateSalaryConfig={handleUpdateSalaryConfig}
-                  onAddSalaryHistory={handleAddSalaryHistory}
-                  activeCurrency={activeCurrency}
-                  currencyRates={currencyRates}
-                />
-              )}
-              {currentTab === 'savings' && (
-                <SavingsCalculatorView
-                  savingsGoals={savingsGoals}
-                  onAddSavingsGoal={handleAddSavingsGoal}
-                  onUpdateSavingsGoal={handleUpdateSavingsGoal}
-                  onDeleteSavingsGoal={handleDeleteSavingsGoal}
-                  activeCurrency={activeCurrency}
-                  currencyRates={currencyRates}
-                  onSyncGoalToBudget={handleSyncGoalToBudget}
-                  monthlySavingsAllocatedInBudget={budgetItems
-                    .filter((b) => b.bucket === 'savings')
-                    .reduce((a, c) => a + c.amount, 0)}
-                />
-              )}
-              {currentTab === 'budget' && (
-                <BudgetView
-                  budgetItems={budgetItems}
-                  onAddBudgetItem={handleAddBudgetItem}
-                  onUpdateBudgetItem={handleUpdateBudgetItem}
-                  onDeleteBudgetItem={handleDeleteBudgetItem}
-                  categoryLimits={categoryLimits}
-                  netMonthlyIncome={netMonthlyIncome}
-                  searchQuery={searchQuery}
-                  activeCurrency={activeCurrency}
-                  currencyRates={currencyRates}
-                  salaryConfig={salaryConfig}
-                />
-              )}
-              {currentTab === 'architecture' && <ArchitectureView />}
-            </div>
+        {currentTab === 'monthly' && (
+          <MonthlyView
+            currentMonthKey={todayMonthKey}
+            selectedMonthKey={selectedMonthlyKey}
+            onSelectMonthKey={setSelectedMonthlyKey}
+            entries={entries}
+            monthBooks={monthBooks}
+            activeCurrency={settings.currency}
+            onOpenAddModal={(mKey) => {
+              if (mKey) setSelectedMonthlyKey(mKey);
+              setAddModalInitialType('expense');
+              setShowAddModal(true);
+            }}
+            onWithdrawFromLockedMonth={handleWithdrawFromLockedMonth}
+          />
+        )}
 
-            {/* Mobile Home Indicator bar */}
-            <div className="bg-neutral-900 py-2 flex justify-center border-t border-neutral-800">
-              <div className="h-1 w-32 rounded-full bg-neutral-600" />
-            </div>
-          </div>
-        ) : (
-          /* Standard Full Responsive View */
-          <div>
-            {currentTab === 'account' && (
-              <MoneyAccountView
-                expenses={monthExpenses}
-                onAddExpense={handleAddMonthExpense}
-                onDeleteExpense={handleDeleteMonthExpense}
-                debtRecords={debtRecords}
-                onAddDebtRecord={handleAddDebtRecord}
-                onUpdateDebtRecord={handleUpdateDebtRecord}
-                onDeleteDebtRecord={handleDeleteDebtRecord}
-                monthlyAccounts={monthlyAccounts}
-                activeCurrency={activeCurrency}
-                currencyRates={currencyRates}
-              />
-            )}
-            {currentTab === 'notes' && (
-              <NotesView
-                notes={notes}
-                onAddNote={handleAddNote}
-                onUpdateNote={handleUpdateNote}
-                onDeleteNote={handleDeleteNote}
-                onRestoreNote={handleRestoreNote}
-                searchQuery={searchQuery}
-              />
-            )}
+        {currentTab === 'daily' && (
+          <DailyView
+            entries={entries}
+            activeCurrency={settings.currency}
+            onOpenAddModal={(type) => {
+              setAddModalInitialType(type || 'expense');
+              setShowAddModal(true);
+            }}
+            onDeleteEntry={handleDeleteEntry}
+          />
+        )}
 
-            {currentTab === 'calendar' && (
-              <CalendarView
-                events={events}
-                onAddEvent={handleAddEvent}
-                onUpdateEvent={handleUpdateEvent}
-                onDeleteEvent={handleDeleteEvent}
-                salaryConfig={salaryConfig}
-                budgetItems={budgetItems}
-                notes={notes}
-                searchQuery={searchQuery}
-                activeCurrency={activeCurrency}
-                currencyRates={currencyRates}
-              />
-            )}
-            {currentTab === 'salary' && (
-              <SalaryView
-                salaryConfig={salaryConfig}
-                onUpdateSalaryConfig={handleUpdateSalaryConfig}
-                onAddSalaryHistory={handleAddSalaryHistory}
-                activeCurrency={activeCurrency}
-                currencyRates={currencyRates}
-              />
-            )}
-            {currentTab === 'savings' && (
-              <SavingsCalculatorView
-                savingsGoals={savingsGoals}
-                onAddSavingsGoal={handleAddSavingsGoal}
-                onUpdateSavingsGoal={handleUpdateSavingsGoal}
-                onDeleteSavingsGoal={handleDeleteSavingsGoal}
-                activeCurrency={activeCurrency}
-                currencyRates={currencyRates}
-                onSyncGoalToBudget={handleSyncGoalToBudget}
-                monthlySavingsAllocatedInBudget={budgetItems
-                  .filter((b) => b.bucket === 'savings')
-                  .reduce((a, c) => a + c.amount, 0)}
-              />
-            )}
-            {currentTab === 'budget' && (
-              <BudgetView
-                budgetItems={budgetItems}
-                onAddBudgetItem={handleAddBudgetItem}
-                onUpdateBudgetItem={handleUpdateBudgetItem}
-                onDeleteBudgetItem={handleDeleteBudgetItem}
-                categoryLimits={categoryLimits}
-                netMonthlyIncome={netMonthlyIncome}
-                searchQuery={searchQuery}
-                activeCurrency={activeCurrency}
-                currencyRates={currencyRates}
-                salaryConfig={salaryConfig}
-              />
-            )}
-            {currentTab === 'architecture' && <ArchitectureView />}
-          </div>
+        {currentTab === 'savings' && (
+          <SavingsView
+            currentMonthKey={selectedMonthlyKey}
+            entries={entries}
+            monthBooks={monthBooks}
+            activeCurrency={settings.currency}
+            onOpenAddModal={() => {
+              setAddModalInitialType('money_in');
+              setShowAddModal(true);
+            }}
+          />
+        )}
+
+        {currentTab === 'notes' && (
+          <NotesView
+            currentMonthKey={selectedMonthlyKey}
+            notes={notes}
+            activeCurrency={settings.currency}
+            onAddNote={(note) => {
+              if (!currentUser) return;
+              const newNote: SmartNote = {
+                ...note,
+                id: 'note-' + Date.now(),
+                userId: currentUser.id,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              };
+              setNotes((prev) => [newNote, ...prev]);
+              playChimeSound('success');
+            }}
+            onUpdateNote={(id, updates) => {
+              setNotes((prev) =>
+                prev.map((n) =>
+                  n.id === id ? { ...n, ...updates, updatedAt: new Date().toISOString() } : n
+                )
+              );
+            }}
+            onDeleteNote={(id) => {
+              setNotes((prev) => prev.filter((n) => n.id !== id));
+            }}
+            onConfirmDetectedTransaction={handleConfirmDetectedTransaction}
+            onEditDetectedTransaction={handleEditDetectedTransaction}
+          />
+        )}
+
+        {currentTab === 'salary' && (
+          <SalaryView
+            entries={entries}
+            activeCurrency={settings.currency}
+            salaryConfig={salaryConfig}
+            onUpdateSalaryConfig={(updates) => setSalaryConfig((prev) => ({ ...prev, ...updates }))}
+            onOpenAddSalaryModal={() => {
+              setAddModalInitialType('money_in');
+              setShowAddModal(true);
+            }}
+          />
+        )}
+
+        {currentTab === 'settings' && (
+          <SettingsView
+            currentUser={currentUser}
+            settings={settings}
+            onUpdateSettings={handleUpdateSettings}
+            onUpdateUserPin={handleUpdateUserPin}
+            onToggleBiometrics={handleToggleBiometrics}
+            onResetAccountData={handleResetAccountData}
+            onLogout={handleLogout}
+          />
         )}
       </main>
+
+      {/* Mobile Bottom Navigation Bar (5 buttons with center +) */}
+      <MobileBottomBar
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        labelLanguage={settings.labelLanguage}
+        onOpenAddModal={() => {
+          setAddModalInitialType('expense');
+          setShowAddModal(true);
+        }}
+        currentUser={currentUser}
+        onLockVault={() => setIsLocked(true)}
+        onLogout={handleLogout}
+        isMobileMenuOpen={isMobileMenuOpen}
+        setIsMobileMenuOpen={setIsMobileMenuOpen}
+      />
     </div>
   );
 }

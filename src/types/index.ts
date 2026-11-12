@@ -1,3 +1,53 @@
+export type AppThemeMode = 'dark' | 'light' | 'oled';
+
+export type SupportedCurrency = 'PKR' | 'USD' | 'EUR' | 'GBP' | 'AED' | 'SAR' | 'EGP';
+
+export type PaymentMethod = 'cash' | 'bank' | 'mobile_wallet';
+
+export type SimpleEntryType = 'money_in' | 'expense' | 'lent' | 'borrowed' | 'returned';
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  pinHash: string; // SHA-256 or secure hash
+  biometricsEnabled: boolean;
+  biometricCredentialId?: string;
+  createdAt: string;
+}
+
+export interface SimpleMoneyEntry {
+  id: string;
+  userId: string;
+  type: SimpleEntryType;
+  amount: number;
+  date: string; // YYYY-MM-DD
+  monthKey: string; // YYYY-MM e.g. '2026-10'
+  whatFor: string; // e.g. "Groceries", "Salary", "Rent"
+  person?: string; // e.g. "Ali", "Father"
+  returnDate?: string; // YYYY-MM-DD for loan due dates
+  isExtra?: boolean; // Extra spending? toggle (yes/no)
+  paymentMethod?: PaymentMethod;
+  savingsGoalSet?: number; // When entering salary, optional goal for the month
+  notes?: string;
+  isCleared?: boolean; // For loans
+  linkedLoanId?: string; // For repayment
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface MonthBook {
+  monthKey: string; // YYYY-MM e.g. '2026-10'
+  monthLabel: string; // e.g. 'October 2026'
+  goal: number; // This month's savings goal
+  stillToSaveFromBefore: number; // Carryover shortfall from previous months
+  target: number; // goal + stillToSaveFromBefore
+  isLocked: boolean;
+  lockedAt?: string;
+  lockedSavedAmount?: number;
+  takenBackAmount?: number; // If money was withdrawn from locked savings
+}
+
 export type NoteColor =
   | 'default'
   | 'amber'
@@ -8,111 +58,46 @@ export type NoteColor =
   | 'teal'
   | 'slate';
 
-export interface ChecklistItem {
+export interface DetectedMoneyPrompt {
   id: string;
-  text: string;
-  completed: boolean;
+  type: SimpleEntryType;
+  amount: number;
+  date: string;
+  personOrCategory: string;
+  rawSnippet: string;
+  confirmed?: boolean;
 }
 
-export interface Note {
+export interface SmartNote {
   id: string;
+  userId: string;
+  monthKey: string; // YYYY-MM e.g. '2026-10'
   title: string;
   content: string;
   color: NoteColor;
   isPinned: boolean;
-  isArchived: boolean;
-  isTrash: boolean;
-  tags: string[];
-  checklist: ChecklistItem[];
-  reminderDate?: string; // ISO string or YYYY-MM-DD
-  isEncrypted?: boolean;
-  cipherPayload?: string;
+  isArchived?: boolean;
   createdAt: string;
   updatedAt: string;
+  detectedPrompt?: DetectedMoneyPrompt | null;
 }
 
-export type EventType = 'event' | 'salary' | 'bill' | 'reminder';
-
-export interface CalendarEvent {
-  id: string;
-  title: string;
-  description?: string;
-  date: string; // YYYY-MM-DD
-  time?: string; // HH:mm
-  type: EventType;
-  color: string;
-  amount?: number;
-  linkedNoteId?: string;
-  isCompleted?: boolean;
-  isAlarmEnabled?: boolean;
-  receivablePerson?: string;
-}
-
-
-export interface SalaryConfig {
+export interface SalaryBreakdownConfig {
   baseSalary: number;
-  payPeriod: 'annually' | 'monthly' | 'biweekly' | 'hourly';
-  hoursPerWeek: number;
-  payDayFrequency: 'monthly' | 'semi-monthly' | 'bi-weekly';
-  payDayDate: number; // Day of month e.g. 25, 28, 1
-  payDayDateSecondary?: number; // For semi-monthly e.g. 15
-  federalTaxRate: number; // e.g. 14 (%)
-  stateTaxRate: number; // e.g. 5 (%)
-  ficaTaxRate: number; // e.g. 7.65 (%)
-  retirement401kPct: number; // e.g. 6 (%)
-  healthInsuranceMonthly: number; // e.g. 240 ($)
-  otherDeductionsMonthly: number; // e.g. 50 ($)
-  bonusMonthlyAvg: number; // e.g. 200 ($)
-  overtimeHoursPerMonth: number;
-  overtimeMultiplier: number; // e.g. 1.5
-  currency: string;
-  history: Array<{
-    id: string;
-    date: string;
-    title: string;
-    annualEquivalent: number;
-    notes?: string;
-  }>;
+  payPeriod: 'monthly' | 'annually' | 'biweekly';
+  taxRatePercent: number; // e.g. 5%
+  providentFundPercent: number; // e.g. 8%
+  medicalAllowance: number;
+  otherDeductions: number;
+  bonusExpected: number;
 }
 
-export type BudgetBucket = 'need' | 'want' | 'savings';
-
-export type ExpenseCategory =
-  | 'Housing'
-  | 'Utilities'
-  | 'Groceries'
-  | 'Dining & Food'
-  | 'Transportation'
-  | 'Healthcare'
-  | 'Entertainment'
-  | 'Subscriptions'
-  | 'Debt & Loans'
-  | 'Savings & Investments'
-  | 'Shopping'
-  | 'Personal Care'
-  | 'Other';
-
-export interface BudgetItem {
-  id: string;
-  title: string;
-  amount: number;
-  category: ExpenseCategory;
-  bucket: BudgetBucket;
-  date: string; // YYYY-MM-DD
-  isRecurring: boolean;
-  recurringFrequency?: 'monthly' | 'weekly' | 'yearly';
-  dueDate?: number; // 1-31
-  isPaid: boolean;
-  paymentMethod: 'Credit Card' | 'Debit Card' | 'Bank Transfer' | 'Cash' | 'Auto-Pay' | 'Raast' | 'EasyPaisa' | 'JazzCash' | 'Nayapay' | 'Sadapay';
-  notes?: string;
-  isEncrypted?: boolean;
-}
-
-export interface CategoryAllocation {
-  category: ExpenseCategory;
-  monthlyLimit: number;
-  bucket: BudgetBucket;
-  color: string;
+export interface AppSettings {
+  labelLanguage: 'en' | 'roman_urdu';
+  currency: SupportedCurrency;
+  notificationTime: string; // e.g. '09:00'
+  theme: AppThemeMode;
+  autoLockMinutes: number; // 0 = disabled, 1, 5, 15
 }
 
 export interface AppNotification {
@@ -120,121 +105,6 @@ export interface AppNotification {
   title: string;
   message: string;
   timestamp: string;
-  type: 'salary' | 'bill' | 'reminder' | 'security' | 'budget';
   read: boolean;
-  actionTab?: 'notes' | 'calendar' | 'salary' | 'budget' | 'account' | 'savings';
+  type: 'loan' | 'extra' | 'savings' | 'lock' | 'general';
 }
-
-export interface SecuritySettings {
-  isLocked: boolean;
-  isConfigured: boolean;
-  pinHash: string; // SHA-256 hash
-  biometricsEnabled: boolean;
-  biometricCredentialId?: string;
-  e2eeEnabled: boolean;
-  masterSalt: string;
-  autoLockMinutes: number; // 0 = immediate, 1, 5, 15, -1 = never
-  lastActive: number;
-}
-
-export type AppThemeMode = 'dark' | 'light' | 'oled' | 'system';
-export type AccentColor = 'emerald' | 'amber' | 'indigo' | 'rose' | 'cyan';
-
-export interface DeviceSyncStatus {
-  deviceId: string;
-  deviceName: string;
-  platform: 'Web' | 'iOS' | 'Android' | 'macOS';
-  lastSynced: string;
-  isCurrentDevice: boolean;
-  syncState: 'in-sync' | 'syncing' | 'offline';
-}
-
-export type SupportedCurrency = 'USD' | 'PKR' | 'EGP' | 'EUR' | 'GBP';
-
-export interface CurrencyInfo {
-  code: SupportedCurrency;
-  symbol: string;
-  name: string;
-  rateAgainstUSD: number;
-  flag: string;
-  locale: string;
-}
-
-export interface SavingsGoal {
-  id: string;
-  title: string;
-  targetAmount: number; // base USD
-  currentAmount: number; // base USD
-  monthlyContribution: number; // base USD
-  targetDate: string; // YYYY-MM-DD
-  category:
-    | 'Emergency Fund'
-    | 'House & Property'
-    | 'Gold & Investment'
-    | 'Vehicle'
-    | 'Hajj & Travel'
-    | 'Retirement'
-    | 'General';
-  annualReturnRate: number; // APY %
-  isCompleted: boolean;
-  notes?: string;
-  createdAt: string;
-}
-
-export type LoanType = 'given_udhaar' | 'given_family' | 'taken_borrowed';
-export type LoanStatus = 'pending' | 'partially_returned' | 'cleared' | 'gift_no_return';
-
-export interface LoanMilestone {
-  id: string;
-  date: string; // YYYY-MM-DD
-  label: string;
-  amount?: number;
-  isAlarmEnabled: boolean;
-  status: 'pending' | 'cleared';
-}
-
-export interface PersonDebtRecord {
-  id: string;
-  personName: string;
-  amount: number;
-  type: LoanType;
-  dateGiven: string;
-  expectedReturnDate?: string;
-  milestones?: LoanMilestone[];
-  returnedAmount: number;
-  status: LoanStatus;
-  notes?: string;
-  monthPeriod: 'Previous Month' | 'Current Month' | 'General';
-}
-
-export interface MonthlyAccountRecord {
-  id: string;
-  monthLabel: string;
-  incomeInflow: number;
-  startingBalance: number;
-  totalAvailable: number;
-  totalSpent: number;
-  endingBalance: number;
-  savingsTarget: number;
-  savingsAchieved: number;
-  whyAnalysis: {
-    title: string;
-    explanation: string;
-    positiveFactors: string[];
-    negativeFactors: string[];
-  };
-}
-
-export interface MonthExpenseItem {
-  id: string;
-  title: string;
-  amount: number;
-  category: string;
-  monthPeriod: 'previous' | 'current';
-  date: string;
-  recipient?: string;
-  notes?: string;
-}
-
-
-

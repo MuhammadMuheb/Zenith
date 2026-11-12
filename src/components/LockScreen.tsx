@@ -1,13 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Lock,
-  Fingerprint,
-  ScanFace,
-  KeyRound,
-  Delete,
   ShieldCheck,
+  Fingerprint,
+  Delete,
   AlertCircle,
-  Sparkles,
+  KeyRound,
 } from 'lucide-react';
 import { authenticateWithBiometrics, checkBiometricsSupport } from '../services/biometrics';
 import { sha256 } from '../services/crypto';
@@ -17,14 +14,18 @@ interface LockScreenProps {
   pinHash: string;
   biometricsEnabled: boolean;
   biometricCredentialId?: string;
+  userName?: string;
   onUnlock: () => void;
+  onLogout?: () => void;
 }
 
 export const LockScreen: React.FC<LockScreenProps> = ({
   pinHash,
   biometricsEnabled,
   biometricCredentialId,
+  userName = 'User',
   onUnlock,
+  onLogout,
 }) => {
   const [pin, setPin] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -38,15 +39,13 @@ export const LockScreen: React.FC<LockScreenProps> = ({
     });
   }, []);
 
-  // Handle number click
   const handleDigit = (digit: string) => {
     if (pin.length < 6) {
       const next = pin + digit;
       setPin(next);
       setErrorMsg('');
 
-      // Auto-validate when 4 digits reached (or 6)
-      if (next.length === 4) {
+      if (next.length >= 4) {
         verifyPin(next);
       }
     }
@@ -64,12 +63,16 @@ export const LockScreen: React.FC<LockScreenProps> = ({
 
   const verifyPin = async (candidatePin: string) => {
     const hash = await sha256(candidatePin);
-    if (hash === pinHash || candidatePin === '1234') {
+    if (hash === pinHash) {
       playChimeSound('success');
       onUnlock();
-    } else {
+    } else if (candidatePin.length === 6) {
       triggerError('Incorrect PIN. Please try again.');
     }
+  };
+
+  const handleManualSubmit = () => {
+    verifyPin(pin);
   };
 
   const triggerError = (msg: string) => {
@@ -79,7 +82,6 @@ export const LockScreen: React.FC<LockScreenProps> = ({
     setTimeout(() => setShake(false), 500);
   };
 
-  // Biometric authentication trigger
   const handleBiometricAuth = async () => {
     setIsVerifyingBiometric(true);
     setErrorMsg('');
@@ -90,10 +92,9 @@ export const LockScreen: React.FC<LockScreenProps> = ({
         onUnlock();
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Biometric verification cancelled or unavailable';
-      // In simulated preview environments without enrolled TouchID, provide immediate friendly unlock fallback
+      const msg = err instanceof Error ? err.message : 'Biometric verification cancelled';
       console.warn('Biometric notice:', msg);
-      setErrorMsg('Biometric prompt was dismissed or not enrolled. Please use your PIN.');
+      setErrorMsg('Biometric check was cancelled. Enter your personal PIN.');
     } finally {
       setIsVerifyingBiometric(false);
     }
@@ -106,24 +107,23 @@ export const LockScreen: React.FC<LockScreenProps> = ({
           shake ? 'animate-shake translate-x-1' : ''
         }`}
       >
-        {/* Shield Icon */}
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-400">
           <ShieldCheck className="h-8 w-8" />
         </div>
 
-        <h2 className="text-xl font-bold tracking-tight text-white">Zenith Vault Locked</h2>
+        <h2 className="text-xl font-bold tracking-tight text-white">Zenith Locked</h2>
         <p className="mt-1 text-xs text-neutral-400">
-          End-to-End Encrypted Workspace &amp; Financial Ledger
+          Enter PIN to unlock {userName}&apos;s money workspace
         </p>
 
-        {/* PIN Dots Display */}
+        {/* PIN Dots */}
         <div className="my-6 flex justify-center gap-3">
           {[0, 1, 2, 3].map((idx) => {
             const isFilled = pin.length > idx;
             return (
               <div
                 key={idx}
-                className={`h-4 w-4 rounded-full transition-all duration-200 ${
+                className={`h-3.5 w-3.5 rounded-full transition-all duration-200 ${
                   isFilled
                     ? 'scale-110 bg-emerald-400 shadow-md shadow-emerald-400/40'
                     : 'border-2 border-neutral-600 bg-neutral-800'
@@ -140,18 +140,15 @@ export const LockScreen: React.FC<LockScreenProps> = ({
           </div>
         )}
 
-        {/* Biometric Scan Quick Action */}
-        {biometricsEnabled && (
-          <div className="mb-6">
+        {biometricsEnabled && hasBiometricSensor && (
+          <div className="mb-5">
             <button
               onClick={handleBiometricAuth}
               disabled={isVerifyingBiometric}
-              className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-3 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 active:scale-98 transition shadow-sm"
+              className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 active:scale-98 transition shadow-sm"
             >
-              <Fingerprint className="h-5 w-5 animate-pulse text-emerald-400" />
-              <span>
-                {isVerifyingBiometric ? 'Scanning Biometrics...' : 'Unlock with Face ID / Fingerprint'}
-              </span>
+              <Fingerprint className="h-4 w-4 animate-pulse text-emerald-400" />
+              <span>{isVerifyingBiometric ? 'Verifying...' : 'Face ID / Fingerprint'}</span>
             </button>
           </div>
         )}
@@ -188,11 +185,16 @@ export const LockScreen: React.FC<LockScreenProps> = ({
           </button>
         </div>
 
-        {/* Friendly demo hint */}
-        <div className="mt-6 rounded-lg bg-neutral-800/40 border border-neutral-800 p-2 text-[11px] text-neutral-400 flex items-center justify-center gap-1.5">
-          <KeyRound className="h-3.5 w-3.5 text-emerald-400" />
-          <span>Demo Passcode: <strong>1234</strong></span>
-        </div>
+        {onLogout && (
+          <div className="mt-6 border-t border-neutral-800 pt-3">
+            <button
+              onClick={onLogout}
+              className="text-xs text-neutral-400 hover:text-neutral-200 transition"
+            >
+              Log out of account
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
